@@ -2,7 +2,7 @@
 const redis = require('redis');
 
 // Redis Client Setup (Connecting to memory)
-const redisClient = redis.createClient();
+const redisClient = redis.createClient({ url: process.env.REDIS_URL });
 redisClient.on('error', (err) => console.log('Redis Client Error', err));
 redisClient.connect();
 
