@@ -1,11 +1,5 @@
-// redis.js - Velos Terminal State Management
-const redis = require('redis');
-
-// Redis Client Setup (Connecting to memory)
-const redisClient = redis.createClient({ url: process.env.REDIS_URL });
-redisClient.on('error', (err) => console.log('Redis Client Error', err));
-redisClient.connect();
-
+// redis.js - Velos In-Memory State Management (No Card Required)
+const payloadStore = new Map();
 const TTL_SECONDS = 60; // Strict 60-second rule
 
 async function freezePayload(receiptId, payload) {
@@ -14,24 +8,38 @@ async function freezePayload(receiptId, payload) {
         payload: payload,
         timestamp: Date.now()
     };
-    // Freeze state with 60 seconds TTL
-    await redisClient.set(receiptId, JSON.stringify(data), { EX: TTL_SECONDS });
+    // Freeze state in memory
+    payloadStore.set(receiptId, data);
+
+    // Auto-burn payload after 60 seconds (Fail-Closed)
+    setTimeout(() => {
+        if (payloadStore.has(receiptId)) {
+            const current = payloadStore.get(receiptId);
+            if (current.status !== 'APPROVED') {
+                payloadStore.delete(receiptId);
+                console.log(`[VELOS] TTL Expired. Dropped ID: ${receiptId}`);
+            }
+        }
+    }, TTL_SECONDS * 1000);
+
     return receiptId;
 }
 
 async function checkPayloadState(receiptId) {
-    const data = await redisClient.get(receiptId);
-    return data ? JSON.parse(data) : null;
+    return payloadStore.get(receiptId) || null;
 }
 
 async function releasePayload(receiptId, authHash) {
-    const data = await checkPayloadState(receiptId);
+    const data = payloadStore.get(receiptId);
     if (!data) return false; // Fail-closed if TTL expired
 
     // Update state to APPROVED
     data.status = 'APPROVED';
     data.auth_hash = authHash;
-    await redisClient.set(receiptId, JSON.stringify(data), { EX: 300 }); // Keep log for 5 mins
+    payloadStore.set(receiptId, data);
+
+    // Clear from memory after 5 minutes
+    setTimeout(() => { payloadStore.delete(receiptId); }, 300000);
     return true;
 }
 
