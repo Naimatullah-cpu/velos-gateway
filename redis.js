@@ -1,4 +1,3 @@
-// redis.js - Velos In-Memory State Management (No Card Required)
 const payloadStore = new Map();
 const TTL_SECONDS = 60; // Strict 60-second rule
 
@@ -8,10 +7,8 @@ async function freezePayload(receiptId, payload) {
         payload: payload,
         timestamp: Date.now()
     };
-    // Freeze state in memory
     payloadStore.set(receiptId, data);
 
-    // Auto-burn payload after 60 seconds (Fail-Closed)
     setTimeout(() => {
         if (payloadStore.has(receiptId)) {
             const current = payloadStore.get(receiptId);
@@ -31,14 +28,12 @@ async function checkPayloadState(receiptId) {
 
 async function releasePayload(receiptId, authHash) {
     const data = payloadStore.get(receiptId);
-    if (!data) return false; // Fail-closed if TTL expired
+    if (!data) return false; 
 
-    // Update state to APPROVED
     data.status = 'APPROVED';
     data.auth_hash = authHash;
     payloadStore.set(receiptId, data);
 
-    // Clear from memory after 5 minutes
     setTimeout(() => { payloadStore.delete(receiptId); }, 300000);
     return true;
 }
