@@ -1,7 +1,10 @@
 const express = require('express');
 const crypto = require('crypto');
+const cors = require('cors');
+
 const app = express();
 app.use(express.json());
+app.use(cors());
 
 app.post('/api/v1/intercept', (req, res) => {
     const traceId = "velos_uuid_" + crypto.randomBytes(8).toString('hex');
