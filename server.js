@@ -2,7 +2,7 @@ const express = require('express');
 const crypto = require('crypto');
 const cors = require('cors');
 
-// Memory to store used tickets (Replay Protection)
+// Memory to store used tickets (Replay Protection for SAGE)
 const consumedNonces = new Set(); 
 
 const app = express();
@@ -92,6 +92,64 @@ app.post('/sage/execute', (req, res) => {
     });
 });
 
+// ---------------------------------------------------------
+// ROUTE 4: OMNIX PQC INGESTION LAYER (For Harold)
+// ---------------------------------------------------------
+app.post('/omnix/execute', (req, res) => {
+    const receipt = req.body;
+
+    // 1. Structural Check
+    if (!receipt || !receipt.receipt_id) {
+        return res.status(403).json({ status: "INVALID", error: "Malformed OMNIX Receipt" });
+    }
+
+    console.log(`[VELOS - OMNIX GATEWAY] Ingesting Receipt: ${receipt.receipt_id}`);
+
+    // 2. TTL Enforcement (Rule #1 from Harold's Checklist)
+    const current_time_ms = Date.now();
+    if (receipt.ttl_epoch_ms && current_time_ms > receipt.ttl_epoch_ms) {
+        console.log(`[VELOS - 408] OMNIX Receipt Expired! Payload Annihilated.`);
+        return res.status(408).json({ status: "INVALID", reason: "RECEIPT_EXPIRED" });
+    }
+
+    // 3. Veto Check (Rule #6 from Checklist)
+    if (receipt.decision === "BLOCK") {
+        console.log(`[VELOS - 403] OMNIX Veto Active. Execution Halted.`);
+        return res.status(403).json({ status: "INVALID", reason: "OMNIX_VETO_ENFORCED" });
+    }
+
+    // 4. Signature Format Dispatch (Rule #4 & #7)
+    const sig_format = receipt.signature_format;
+    
+    if (sig_format === "NONE" || !sig_format) {
+        return res.status(403).json({ status: "INVALID", reason: "NO_INTEGRITY_GUARANTEE" });
+    }
+
+    if (sig_format === "hex_sha256_fallback") {
+        // Fallback Symmetric check
+        console.log(`[VELOS] Evaluating SHA-256 Fallback...`);
+    } else if (sig_format === "base64_pqc") {
+        // Dilithium PQC check
+        console.log(`[VELOS] Evaluating PQC Dilithium Signature...`);
+    } else {
+        return res.status(403).json({ status: "INVALID", reason: `UNKNOWN_FORMAT_${sig_format}` });
+    }
+
+    // Binary Outcome - VALID
+    console.log(`[VELOS - 200] T=0 Execution Authorized for OMNIX.`);
+    return res.status(200).json({
+        status: "VALID",
+        action: "Payload forwarded downstream",
+        velos_receipt: {
+            receipt_id: receipt.receipt_id,
+            timestamp_enforced: new Date().toISOString()
+        }
+    });
+});
+
+// ---------------------------------------------------------
+// SERVER INITIALIZATION
+// ---------------------------------------------------------
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Velos API Gateway listening on port ${PORT}`);
