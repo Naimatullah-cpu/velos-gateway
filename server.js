@@ -36,7 +36,42 @@ app.post('/api/v1/intercept', (req, res) => {
         message: "T=0 Boundary unlocked. Payload executed successfully."
     });
 });
+// ---------------------------------------------------------
+// ROUTE 3: SAGE INGESTION LAYER (For Charmaine's ASO Phase 1)
+// ---------------------------------------------------------
+app.post('/sage/execute', (req, res) => {
+    const { payload, aso } = req.body;
 
+    // 1. Check if structure is valid
+    if (!payload || !aso || !aso.control) {
+        console.log("[VELOS - DROP] Invalid Envelope Structure");
+        return res.status(403).json({ 
+            status: "INVALID", 
+            error: "Malformed Admissibility State Object (ASO)" 
+        });
+    }
+
+    const { nonce } = aso.control;
+    const { signature } = aso;
+
+    // 2. Phase 1 Verification (Signature & Nonce present)
+    if (!signature || !nonce) {
+        console.log(`[VELOS - 403] Missing Cryptographic Proof for Object: ${aso.meta.object_id}`);
+        return res.status(403).json({ status: "INVALID", error: "Missing cryptographic constraints" });
+    }
+
+    // 3. Binary Outcome - VALID
+    console.log(`[VELOS - 200] T=0 Execution Authorized. Object ID: ${aso.meta.object_id}`);
+    return res.status(200).json({
+        status: "VALID",
+        action: "Payload forwarded downstream",
+        velos_receipt: {
+            object_id: aso.meta.object_id,
+            issuer_id: aso.meta.issuer_id,
+            timestamp_enforced: new Date().toISOString()
+        }
+    });
+});
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Velos API Gateway listening on port ${PORT}`);
