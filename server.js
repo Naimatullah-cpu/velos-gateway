@@ -1,4 +1,4 @@
-const express = require('express');
+const express = require('express');const consumedNonces = new Set(); // Memory to store used tickets
 const crypto = require('crypto');
 const cors = require('cors');
 
