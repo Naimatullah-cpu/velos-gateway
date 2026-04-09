@@ -1,11 +1,17 @@
-const express = require('express');const consumedNonces = new Set(); // Memory to store used tickets
+const express = require('express');
 const crypto = require('crypto');
 const cors = require('cors');
+
+// Memory to store used tickets (Replay Protection)
+const consumedNonces = new Set(); 
 
 const app = express();
 app.use(express.json());
 app.use(cors());
 
+// ---------------------------------------------------------
+// ROUTE 1: INGESTION (For Dean/Veritas)
+// ---------------------------------------------------------
 app.post('/api/v1/intercept', (req, res) => {
     const traceId = "velos_uuid_" + crypto.randomBytes(8).toString('hex');
     const signature = req.headers['x-signature'];
@@ -36,6 +42,7 @@ app.post('/api/v1/intercept', (req, res) => {
         message: "T=0 Boundary unlocked. Payload executed successfully."
     });
 });
+
 // ---------------------------------------------------------
 // ROUTE 3: SAGE INGESTION LAYER (For Charmaine's ASO Phase 1)
 // ---------------------------------------------------------
@@ -60,6 +67,18 @@ app.post('/sage/execute', (req, res) => {
         return res.status(403).json({ status: "INVALID", error: "Missing cryptographic constraints" });
     }
 
+    // 🔴 NEW: Replay Protection (Nonce Uniqueness Check)
+    if (consumedNonces.has(nonce)) {
+        console.log(`[VELOS - 403] Replay Attack Detected! Nonce already consumed: ${nonce}`);
+        return res.status(403).json({ 
+            status: "INVALID", 
+            error: "Replay Attack Detected: Nonce has already been consumed." 
+        });
+    }
+
+    // Mark nonce as used (Ticket burned)
+    consumedNonces.add(nonce);
+
     // 3. Binary Outcome - VALID
     console.log(`[VELOS - 200] T=0 Execution Authorized. Object ID: ${aso.meta.object_id}`);
     return res.status(200).json({
@@ -72,6 +91,7 @@ app.post('/sage/execute', (req, res) => {
         }
     });
 });
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`Velos API Gateway listening on port ${PORT}`);
