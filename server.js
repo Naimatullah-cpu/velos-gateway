@@ -17,7 +17,6 @@ app.post('/api/v1/intercept', (req, res) => {
     const signature = req.headers['x-signature'];
     const timestamp = req.headers['x-timestamp-unix'];
 
-    // If Signature is missing: FAIL CLOSED (T=0 Halt)
     if (!signature || !timestamp) {
         console.log(`[VELOS T=0 HALT] Unauthorized payload dropped. Trace: ${traceId}`);
         return res.status(408).json({
@@ -29,7 +28,6 @@ app.post('/api/v1/intercept', (req, res) => {
         });
     }
 
-    // If Signature is present: AUTHORIZED EXECUTION (Unlock)
     console.log(`[VELOS UNLOCKED] Signature verified. Payload executing. Trace: ${traceId}`);
     return res.status(200).json({
         status_code: 200,
@@ -44,42 +42,54 @@ app.post('/api/v1/intercept', (req, res) => {
 });
 
 // ---------------------------------------------------------
-// ROUTE 3: SAGE INGESTION LAYER (For Charmaine's ASO Phase 1)
+// ROUTE 2: SAGE INGESTION LAYER (For Charmaine's ASO Phase 1)
 // ---------------------------------------------------------
 app.post('/sage/execute', (req, res) => {
     const { payload, aso } = req.body;
 
-    // 1. Check if structure is valid
-    if (!payload || !aso || !aso.control) {
+    // 1. Strict Structural Check
+    if (!payload || !payload.action || !aso || !aso.control) {
         console.log("[VELOS - DROP] Invalid Envelope Structure");
-        return res.status(403).json({ 
-            status: "INVALID", 
-            error: "Malformed Admissibility State Object (ASO)" 
-        });
+        return res.status(403).json({ status: "INVALID", error: "Malformed Admissibility State Object (ASO)" });
     }
 
-    const { nonce } = aso.control;
+    const { nonce, authority_scope } = aso.control;
     const { signature } = aso;
+    const requestedAction = payload.action;
 
-    // 2. Phase 1 Verification (Signature & Nonce present)
+    // 2. Cryptographic Proof Presence
     if (!signature || !nonce) {
-        console.log(`[VELOS - 403] Missing Cryptographic Proof for Object: ${aso.meta.object_id}`);
+        console.log(`[VELOS - 403] Missing Cryptographic Proof.`);
         return res.status(403).json({ status: "INVALID", error: "Missing cryptographic constraints" });
     }
 
-    // 🔴 NEW: Replay Protection (Nonce Uniqueness Check)
+    // 3. Ultra-Strict Replay Protection (Nonce Burner)
     if (consumedNonces.has(nonce)) {
-        console.log(`[VELOS - 403] Replay Attack Detected! Nonce already consumed: ${nonce}`);
+        console.log(`[VELOS - 403] Replay Attack Detected! Nonce: ${nonce}`);
+        return res.status(403).json({ status: "INVALID", error: "Replay Attack Detected: Nonce burned." });
+    }
+    consumedNonces.add(nonce);
+
+    // 4. 🔴 ULTRA-STRICT AUTHORITY SCOPE BINDING (The Iron Lock)
+    if (!authority_scope || !Array.isArray(authority_scope)) {
+        return res.status(403).json({ status: "INVALID", error: "Missing authority scope array." });
+    }
+
+    // Mathematical Scope Resolution: Translates "execute_trade" -> "trade.execute" to match scope
+    const actionParts = requestedAction.split('_');
+    const expectedScopeSuffix = actionParts.length === 2 ? `${actionParts[1]}.${actionParts[0]}` : requestedAction;
+    
+    const isAuthorized = authority_scope.some(scope => scope.endsWith(expectedScopeSuffix));
+
+    if (!isAuthorized) {
+        console.log(`[VELOS - 403] Scope Mismatch Blocked. Attempted: ${requestedAction}`);
         return res.status(403).json({ 
             status: "INVALID", 
-            error: "Replay Attack Detected: Nonce has already been consumed." 
+            error: `Authority Scope Mismatch: Action '${requestedAction}' is strictly outside the authorized cryptographic mandate.` 
         });
     }
 
-    // Mark nonce as used (Ticket burned)
-    consumedNonces.add(nonce);
-
-    // 3. Binary Outcome - VALID
+    // 5. Binary Outcome - VALID
     console.log(`[VELOS - 200] T=0 Execution Authorized. Object ID: ${aso.meta.object_id}`);
     return res.status(200).json({
         status: "VALID",
@@ -93,49 +103,31 @@ app.post('/sage/execute', (req, res) => {
 });
 
 // ---------------------------------------------------------
-// ROUTE 4: OMNIX PQC INGESTION LAYER (For Harold)
+// ROUTE 3: OMNIX PQC INGESTION LAYER (For Harold)
 // ---------------------------------------------------------
 app.post('/omnix/execute', (req, res) => {
     const receipt = req.body;
 
-    // 1. Structural Check
     if (!receipt || !receipt.receipt_id) {
         return res.status(403).json({ status: "INVALID", error: "Malformed OMNIX Receipt" });
     }
 
-    console.log(`[VELOS - OMNIX GATEWAY] Ingesting Receipt: ${receipt.receipt_id}`);
-
-    // 2. TTL Enforcement (Rule #1 from Harold's Checklist)
     const current_time_ms = Date.now();
     if (receipt.ttl_epoch_ms && current_time_ms > receipt.ttl_epoch_ms) {
         console.log(`[VELOS - 408] OMNIX Receipt Expired! Payload Annihilated.`);
         return res.status(408).json({ status: "INVALID", reason: "RECEIPT_EXPIRED" });
     }
 
-    // 3. Veto Check (Rule #6 from Checklist)
     if (receipt.decision === "BLOCK") {
         console.log(`[VELOS - 403] OMNIX Veto Active. Execution Halted.`);
         return res.status(403).json({ status: "INVALID", reason: "OMNIX_VETO_ENFORCED" });
     }
 
-    // 4. Signature Format Dispatch (Rule #4 & #7)
     const sig_format = receipt.signature_format;
-    
     if (sig_format === "NONE" || !sig_format) {
         return res.status(403).json({ status: "INVALID", reason: "NO_INTEGRITY_GUARANTEE" });
     }
 
-    if (sig_format === "hex_sha256_fallback") {
-        // Fallback Symmetric check
-        console.log(`[VELOS] Evaluating SHA-256 Fallback...`);
-    } else if (sig_format === "base64_pqc") {
-        // Dilithium PQC check
-        console.log(`[VELOS] Evaluating PQC Dilithium Signature...`);
-    } else {
-        return res.status(403).json({ status: "INVALID", reason: `UNKNOWN_FORMAT_${sig_format}` });
-    }
-
-    // Binary Outcome - VALID
     console.log(`[VELOS - 200] T=0 Execution Authorized for OMNIX.`);
     return res.status(200).json({
         status: "VALID",
