@@ -53,7 +53,8 @@ app.post('/sage/execute', (req, res) => {
         return res.status(403).json({ status: "INVALID", error: "Malformed Admissibility State Object (ASO)" });
     }
 
-    const { nonce, authority_scope } = aso.control;
+    // Extracting all control parameters including Time (TTL)
+    const { nonce, authority_scope, timestamp_issued, ttl_ms } = aso.control;
     const { signature } = aso;
     const requestedAction = payload.action;
 
@@ -70,7 +71,21 @@ app.post('/sage/execute', (req, res) => {
     }
     consumedNonces.add(nonce);
 
-    // 4. 🔴 ULTRA-STRICT AUTHORITY SCOPE BINDING (The Iron Lock)
+    // 4. 🔴 TEMPORAL ADMISSIBILITY (TTL) CHECK - The Clock Lock
+    if (timestamp_issued && ttl_ms) {
+        const issueTime = new Date(timestamp_issued).getTime();
+        const currentTime = Date.now();
+        // If current time is greater than issue time + ttl_ms, drop it!
+        if (currentTime > (issueTime + ttl_ms)) {
+            console.log(`[VELOS - 403] ASO Expired! Issued: ${timestamp_issued}`);
+            return res.status(403).json({ 
+                status: "INVALID", 
+                error: "Temporal Admissibility Failed: ASO TTL has expired. Payload Annihilated." 
+            });
+        }
+    }
+
+    // 5. 🔴 ULTRA-STRICT AUTHORITY SCOPE BINDING (The Iron Lock)
     if (!authority_scope || !Array.isArray(authority_scope)) {
         return res.status(403).json({ status: "INVALID", error: "Missing authority scope array." });
     }
@@ -89,7 +104,7 @@ app.post('/sage/execute', (req, res) => {
         });
     }
 
-    // 5. Binary Outcome - VALID
+    // 6. Binary Outcome - VALID
     console.log(`[VELOS - 200] T=0 Execution Authorized. Object ID: ${aso.meta.object_id}`);
     return res.status(200).json({
         status: "VALID",
