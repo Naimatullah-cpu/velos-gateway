@@ -10,6 +10,13 @@ app.use(express.json());
 app.use(cors());
 
 // ---------------------------------------------------------
+// ROUTE 0: HEALTH CHECK (For UptimeRobot)
+// ---------------------------------------------------------
+app.get('/ping', (req, res) => {
+    res.status(200).send('Velos T=0 Gateway is Armed and Active.');
+});
+
+// ---------------------------------------------------------
 // ROUTE 1: INGESTION (For Dean/Veritas)
 // ---------------------------------------------------------
 app.post('/api/v1/intercept', (req, res) => {
